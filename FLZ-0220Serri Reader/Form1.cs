@@ -16,6 +16,7 @@ using System.Threading;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 using System.IO;
 using System.Diagnostics;
+using OfficeOpenXml;
 
 namespace FLZ_0220Serri_Reader
 {
@@ -25,7 +26,7 @@ namespace FLZ_0220Serri_Reader
         /// Nếu true: Cho chương trình chạy
         /// Nếu false: Không cho chương trình chạy
         /// </summary>
-        Boolean start = false;
+        Boolean isReadingData = false;
 
         /// <summary>
         /// Nếu true: Tắt chương trình
@@ -33,8 +34,16 @@ namespace FLZ_0220Serri_Reader
         /// </summary>
         Boolean end = false;
 
+        char dau = ',';
+
+        private readonly object _lock = new object();
+
+
+
         // Danh sách serial Port,
-        List<SerialPort> listSerialPort = new List<SerialPort>();
+        private List<ketQuaDo> dsKQDo = new List<ketQuaDo>();
+
+        private List<Thread> listeningThreads = new List<Thread>();
 
         //2000‐04‐01,15:17:01,00001,02,NG+ ,SData,+0001.,mL/min,+699.,kPa,+0.0000E+0,WORK2
 
@@ -208,7 +217,6 @@ namespace FLZ_0220Serri_Reader
             cbxChonMayDo.DataSource = null;
             cbxChonMayDo.DataSource = dsPort;
             cbxChonMayDo.DisplayMember = "TenMay";
-
         }
 
         // Lưu thông tin vào Settings.setting
@@ -304,7 +312,7 @@ namespace FLZ_0220Serri_Reader
 
             if (dlInput.Count == 0 || vtLuuFile == "")
             {
-                start = false;
+                isReadingData = false;
                 this.thongBao("Cần cập nhật danh sách máy kiểm tra", true, false);
                 return;
             }
@@ -331,7 +339,8 @@ namespace FLZ_0220Serri_Reader
         // Lưu dữ liệu vào danh sách chờ đo
         private void updateDsTTMayDoHang(List<ttInput> ttInput)
         {
-            
+
+            grvDSMayDangHoatDong.Rows.Clear();
             foreach (var item in ttInput)
             {
                 int rowIndex = grvDSMayDangHoatDong.Rows.Add();
@@ -355,16 +364,76 @@ namespace FLZ_0220Serri_Reader
             #region Sau khi hoàn thành sẽ bỏ comment
             string path = this.layDuongDanLuuKQ();
 
-            if (System.IO.Directory.Exists(path))
+            //if (System.IO.Directory.Exists(path))
+            //{
+            //    // Mở thư mục sử dụng Process.Start
+            //    Process.Start("explorer.exe", path);
+            //}
+            //else
+            //{
+            //    this.thongBao("Thư mục không tồn tại hoặc đã bị xoá", true, false);
+            //}
+            #endregion
+
+            List<string> dsTieuDe = new List<string> { "STT", "Tên", "Tuổi", "Địa chỉ", "Email" };
+
+            string fileName = "example.xlsx"; // Tên tệp Excel
+            string filePath = Path.Combine(path, fileName); // Kết hợp thư mục và tên tệp
+
+
+            List<List<string>> duLieu = new List<List<string>>
             {
-                // Mở thư mục sử dụng Process.Start
-                Process.Start("explorer.exe", path);
+                new List<string> { "1", "John", "30", "123 Main St", "john@example.com" },
+                new List<string> { "2", "Jane", "25", "456 Elm St", "jane@example.com" },
+            };
+
+            bool taoFileExcel = this.taoExcelFile(filePath, dsTieuDe, duLieu);
+
+            if (taoFileExcel)
+            {
+                Close();
             }
             else
             {
-                this.thongBao("Thư mục không tồn tại hoặc đã bị xoá", true, false);
+                this.thongBao("Lỗi chưa thể tạo file Excel", true,true);
             }
-            #endregion
+        }
+
+        private bool taoExcelFile(string path, List<string> dsTieuDe, List<List<string>> duLieu)
+        {
+
+            try
+            {
+                ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
+
+                FileInfo fileInfo = new FileInfo(path);
+                
+                // Nếu đường path không có dữ liệu thì tạo mới file
+                ExcelPackage package = fileInfo.Exists ?  new ExcelPackage(fileInfo) : new ExcelPackage();
+
+                // Lấy hoặc tạo trang Excel đầu tiên
+                ExcelWorksheet worksheet = package.Workbook.Worksheets["Sheet1"];
+                if (worksheet == null)
+                {
+                    worksheet = package.Workbook.Worksheets.Add("Sheet1");
+                    worksheet.Cells[1, 1].LoadFromArrays(new List<string[]> { dsTieuDe.ToArray() });
+                }
+
+                // Xác định dòng cuối cùng chứa dữ liệu
+                int lastRow = worksheet.Dimension?.End.Row ?? 0;
+
+                // Bắt đầu ghi dữ liệu mới từ dòng tiếp theo sau dòng cuối cùng
+                int newRow = lastRow + 1;
+
+                List<object[]> duLieuObjects = duLieu.Select(row => row.Cast<object>().ToArray()).ToList();
+                worksheet.Cells[newRow, 1].LoadFromArrays(duLieuObjects);
+
+                package.SaveAs(fileInfo);
+
+                return true;
+            }catch { 
+                return false;
+            }
         }
 
         // Link tới facebook
@@ -388,7 +457,7 @@ namespace FLZ_0220Serri_Reader
             // Kiểm tra dữ liệu
             if (vtLuuFile == "" || dlInput.Count == 0)
             {
-                start = false;
+                isReadingData = false;
                 this.thongBao("Không đủ dữ liệu để bắt đầu.", true, false);
                 return;
             }
@@ -403,7 +472,7 @@ namespace FLZ_0220Serri_Reader
             tbQrCodeInput.Focus();
 
             // Cho phép máy chạy
-            start = true;
+            isReadingData = true;
 
             // Chuyển sang trạng thái tạm dừng
             end = false;
@@ -449,7 +518,7 @@ namespace FLZ_0220Serri_Reader
             this.thayDoiTrangThai(true);
 
             // Tắt chạy
-            start = false;
+            isReadingData = false;
 
             // Nhấn nút nữa sẽ thoát
             end = true;
@@ -457,7 +526,7 @@ namespace FLZ_0220Serri_Reader
         }
 
         // Sự kiện nhận dữ liệu từ textbox Qr
-        private void tbQrCodeInput_KeyPress(object sender, KeyPressEventArgs e)
+        private async void tbQrCodeInput_KeyPress(object sender, KeyPressEventArgs e)
         {
             #region Bảng chú thích các kí hiệu
             // Kí tự CR = \r
@@ -465,38 +534,101 @@ namespace FLZ_0220Serri_Reader
             // Kí tự CRLF = \r\n
             #endregion
 
-            if (e.KeyChar == '\r')
+            if (e.KeyChar == '\r' && isReadingData)
             {
                 // Lấy thông tin input
                 ttInput tt = this.timTenMayTheoPORT();
 
+                //lblQr.Text = tbQrCodeInput.Text;
+                //tbQrCodeInput.Text = "";
+
                 SerialPort port = this.taoSerialPort(tt.TenPort);
+
                 if (port == null)
                 {
-                    this.thongBao("Không tìm thấy "+ tt.TenPort + ". Update lại DS ĐĂNG KÍ MÁY ĐO và thử lại.",true,false);
+                    this.thongBao("Không tìm thấy "+ tt.TenPort + ". Update lại DS ĐĂNG KÍ MÁY ĐO và Thử lại.",true,false);
                     return;
                 }
 
                 try
                 {
-                    port.Open();
+                    //Thread listeningThread = new Thread(() => ListenSerialData(port));
+                    //listeningThread.Start();
+
+
+                    ketQuaDo kquado = new ketQuaDo();
+                    kquado.maHang = "Test mã Hàng";
+                    kquado.tenMay = tt.TenMay;
+                    kquado.tenPort = tt.TenPort;
+                    kquado.qr = tbQrCodeInput.Text;
+
+                    await ListenSerialData(port, kquado);
+
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine(ex.Message);
-
                     this.thongBao("Máy "+ tt.TenMay + " đang được sử dụng. Chọn máy đo khác", true, false);
                     return;
                 }
-
-
-
-
             }
         }
 
-        // Cập nhật dữ liệu vào bảng TÌNH TRẠNG MÁY ĐO
+        // Lắng nghe kết quả từ cổng serial port
+        private Task ListenSerialData(SerialPort serialPort, ketQuaDo kquado)
+        {
+            try
+            {
+                serialPort.Open();
 
+                serialPort.DataReceived += (sender, e) =>
+                {
+                    DataReceivedHandler(sender, e, kquado);
+                };
+            }
+            catch (TimeoutException ex)
+            {
+                Console.WriteLine("Timeout: Không nhận được dữ liệu mới từ port.");
+            }
+            catch (Exception ex)
+            {
+                // Xử lý các ngoại lệ khác
+                //Console.WriteLine("Lỗi khi đọc dữ liệu từ port: " + ex.Message);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e , ketQuaDo kquado)
+        {
+            SerialPort sp = (SerialPort)sender;
+            string data = sp.ReadExisting();
+
+            string[] arr = data.Split(dau);
+
+            if (arr.Length < 1) return;
+
+            // Định dạng ngày mong muốn
+            string[] formats = { "yyyy-MM-dd" };
+
+            // Kiểm tra xem chuỗi có đúng định dạng YYYY-MM-DD không
+            if (!DateTime.TryParseExact(arr[0], formats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime lotSX))
+            {
+                return;
+            }
+
+            kquado.lotSX = arr[0];
+            kquado.thoiGian = arr[1];
+            kquado.danhGia = arr[3];
+            kquado.ketQua = arr[5];
+            kquado.donVi = arr[6];
+            kquado.apSuatTest = arr[7];
+            kquado.donViApSuatTest = arr[8];  
+
+            lock (_lock) { dsKQDo.Add(kquado); }
+            sp.Close();
+            return;
+        }
 
 
         private SerialPort taoSerialPort(string portName, int br = 9600)
@@ -513,6 +645,15 @@ namespace FLZ_0220Serri_Reader
             return new ttInput(selectedItem.TenMay, selectedItem.TenPort);
         }
 
+        private void pbTrangThai_Click(object sender, EventArgs e)
+        {
+            #region
+            //Sau này sẽ xoá dữ liệu này
+
+            Console.WriteLine(dsKQDo);
+
+            #endregion
+        }
     }
 
     public class ttInput
@@ -523,6 +664,76 @@ namespace FLZ_0220Serri_Reader
         {
             TenMay = tenMay;
             TenPort = portMay;
+        }
+    }
+
+    public class ketQuaDo
+    {
+        private string MaHang;
+        private string TenMay;
+        private string TenPort;
+        private string LotSX;
+        private string Qr;
+        private string ThoiGian;
+        private string DanhGia;
+        private string KetQua;
+        private string DonVi;
+        private string ApSuatTest;
+        private string DonViApSuatTest;
+        public string maHang
+        {
+            get { return MaHang; }
+            set { MaHang = value; }
+        }
+        public string tenMay
+        {
+            get { return TenMay; }
+            set { TenMay = value; }
+        }
+        public string tenPort
+        {
+            get { return TenPort; }
+            set { TenPort = value; }
+        }
+        public string lotSX
+        {
+            get { return LotSX; }
+            set { LotSX = value; }
+        }
+        public string qr
+        {
+            get { return Qr; }
+            set { Qr = value; }
+        }
+        public string thoiGian
+        {
+            get { return ThoiGian; }
+            set { ThoiGian = value; }
+        }
+        public string danhGia
+        {
+            get { return DanhGia; }
+            set { DanhGia = value; }
+        }
+        public string ketQua
+        {
+            get { return KetQua; }
+            set { KetQua = value; }
+        }
+        public string donVi
+        {
+            get { return DonVi; }
+            set { DonVi = value; }
+        }
+        public string apSuatTest
+        {
+            get { return ApSuatTest; }
+            set { ApSuatTest = value; }
+        }
+        public string donViApSuatTest
+        {
+            get { return DonViApSuatTest; }
+            set { DonViApSuatTest = value; }
         }
     }
 }
