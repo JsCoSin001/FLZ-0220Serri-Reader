@@ -28,31 +28,19 @@ namespace FLZ_0220Serri_Reader
         /// </summary>
         Boolean isReadingData = false;
 
-        /// <summary>
-        /// Nếu true: Tắt chương trình
-        /// Nếu false: Tạm dừng chương trình
-        /// </summary>
-        Boolean end = false;
-
+        // Dấu phân cách
         char dau = ',';
 
         private readonly object _lock = new object();
 
-
-
         // Danh sách serial Port,
         private List<ketQuaDo> dsKQDo = new List<ketQuaDo>();
-
-        private List<Thread> listeningThreads = new List<Thread>();
-
-        //2000‐04‐01,15:17:01,00001,02,NG+ ,SData,+0001.,mL/min,+699.,kPa,+0.0000E+0,WORK2
 
         public Form1()
         {
             InitializeComponent();
             KeyPreview = true;
             KeyDown += MainForm_KeyDown;
-            end = true;
 
         }
 
@@ -63,7 +51,6 @@ namespace FLZ_0220Serri_Reader
             {
                 string tb = "Để tắt chương trình, nhấn vào nút KẾT THÚC";
 
-                if (!end) tb = "Để tắt chương trình, nhấn 2 lần vào vị trí TẠM DỪNG";
                 e.Handled = true;
                 this.thongBao(tb, true, false);
             }
@@ -291,7 +278,6 @@ namespace FLZ_0220Serri_Reader
         // Ứng dụng được build hoàn thiện
         private void Form1_Shown(object sender, EventArgs e)
         {
-
             // Lấy vị trí lưu
             string vtLuuFile = this.layVTLuuKQ();
             lbThuMucLuuKQ.Text = vtLuuFile;
@@ -364,51 +350,31 @@ namespace FLZ_0220Serri_Reader
             #region Sau khi hoàn thành sẽ bỏ comment
             string path = this.layDuongDanLuuKQ();
 
-            //if (System.IO.Directory.Exists(path))
-            //{
-            //    // Mở thư mục sử dụng Process.Start
-            //    Process.Start("explorer.exe", path);
-            //}
-            //else
-            //{
-            //    this.thongBao("Thư mục không tồn tại hoặc đã bị xoá", true, false);
-            //}
-            #endregion
-
-            List<string> dsTieuDe = new List<string> { "STT", "Tên", "Tuổi", "Địa chỉ", "Email" };
-
-            string fileName = "example.xlsx"; // Tên tệp Excel
-            string filePath = Path.Combine(path, fileName); // Kết hợp thư mục và tên tệp
-
-
-            List<List<string>> duLieu = new List<List<string>>
+            if (System.IO.Directory.Exists(path))
             {
-                new List<string> { "1", "John", "30", "123 Main St", "john@example.com" },
-                new List<string> { "2", "Jane", "25", "456 Elm St", "jane@example.com" },
-            };
-
-            bool taoFileExcel = this.taoExcelFile(filePath, dsTieuDe, duLieu);
-
-            if (taoFileExcel)
-            {
-                Close();
+                // Mở thư mục sử dụng Process.Start
+                Process.Start("explorer.exe", path);
             }
             else
             {
-                this.thongBao("Lỗi chưa thể tạo file Excel", true,true);
+                this.thongBao("Thư mục không tồn tại hoặc đã bị xoá", true, false);
             }
+            #endregion            
         }
 
-        private bool taoExcelFile(string path, List<string> dsTieuDe, List<List<string>> duLieu)
+        private bool taoExcelFile(List<string> dsTieuDe)
         {
+            string path = this.layDuongDanLuuKQ();
+            string fileName = this.taoTenFile();
+            string filePath = Path.Combine(path, fileName); // Kết hợp thư mục và tên tệp  
 
             try
             {
                 ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
 
-                FileInfo fileInfo = new FileInfo(path);
-                
-                // Nếu đường path không có dữ liệu thì tạo mới file
+                FileInfo fileInfo = new FileInfo(filePath);
+
+                // Nếu đường filePath không có dữ liệu thì tạo mới file
                 ExcelPackage package = fileInfo.Exists ?  new ExcelPackage(fileInfo) : new ExcelPackage();
 
                 // Lấy hoặc tạo trang Excel đầu tiên
@@ -425,8 +391,7 @@ namespace FLZ_0220Serri_Reader
                 // Bắt đầu ghi dữ liệu mới từ dòng tiếp theo sau dòng cuối cùng
                 int newRow = lastRow + 1;
 
-                List<object[]> duLieuObjects = duLieu.Select(row => row.Cast<object>().ToArray()).ToList();
-                worksheet.Cells[newRow, 1].LoadFromArrays(duLieuObjects);
+                worksheet.Cells["A" + newRow].LoadFromCollection(dsKQDo, false);
 
                 package.SaveAs(fileInfo);
 
@@ -434,6 +399,12 @@ namespace FLZ_0220Serri_Reader
             }catch { 
                 return false;
             }
+        }
+
+        // Định dạng ngày tháng năm cho tên file
+        private string taoTenFile()
+        {
+            return DateTime.Now.ToString("dd/MM/yyyy");
         }
 
         // Link tới facebook
@@ -498,31 +469,27 @@ namespace FLZ_0220Serri_Reader
         // Nút KẾT THÚC hoặc TẠM NGỪNG ĐƯỢC NHẤN
         private void btnKetThuc_Click(object sender, EventArgs e)
         {
-            // Đóng chương trình
-            if (end)
+            DialogResult closeMess = MessageBox.Show("Chương trình sẽ đóng?", "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (closeMess == DialogResult.Yes)
             {
-                DialogResult closeMess = MessageBox.Show("Chương trình sẽ đóng?", "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                if (closeMess == DialogResult.Yes)
+                if (dsKQDo.Count() == 0)
                 {
-                    // Viết một số hàm xuất excel ở đây
-                    // ...
-
                     Close();
-                }
-                return;
-            }
+                    return;
+                };
 
-            DialogResult result = MessageBox.Show("Tạm dừng?", "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (result == DialogResult.No) return;
+                List<string> dsTieuDe = new List<string> { "MÃ HÀNG", "TÊN MÁY", "TÊN CỔNG", "NGÀY SX", "QR", "THỜI GIAN", "ĐÁNH GIÁ", "KẾT QUẢ", "ĐƠN VỊ", "ÁP SUẤT TEST", "ĐƠN VỊ ÁP SUẤT TEST" };
 
-            this.thayDoiTrangThai(true);
+                bool taoFileExcel = this.taoExcelFile(dsTieuDe);
 
-            // Tắt chạy
-            isReadingData = false;
+                do
+                {
+                    DialogResult tb = MessageBox.Show("FILE CHƯA ĐƯỢC LƯU. \nYES để thử lại - NO để thoát", "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    taoFileExcel = tb == DialogResult.Yes ? true : false;
+                } while (taoFileExcel);
 
-            // Nhấn nút nữa sẽ thoát
-            end = true;
-
+                Close();
+            }    
         }
 
         // Sự kiện nhận dữ liệu từ textbox Qr
@@ -598,7 +565,8 @@ namespace FLZ_0220Serri_Reader
 
             return Task.CompletedTask;
         }
-
+        
+        // Nhận dữ liệu
         private void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e , ketQuaDo kquado)
         {
             SerialPort sp = (SerialPort)sender;
@@ -630,7 +598,7 @@ namespace FLZ_0220Serri_Reader
             return;
         }
 
-
+        // Tạo 1 đối tượng serial port
         private SerialPort taoSerialPort(string portName, int br = 9600)
         {
             SerialPort serialPort = new SerialPort();
@@ -639,11 +607,13 @@ namespace FLZ_0220Serri_Reader
             return serialPort;
         }
 
+        // Tìm tên máy theo port
         private ttInput timTenMayTheoPORT()
         {
             ttInput selectedItem = (ttInput)cbxChonMayDo.SelectedItem;
             return new ttInput(selectedItem.TenMay, selectedItem.TenPort);
         }
+
 
         private void pbTrangThai_Click(object sender, EventArgs e)
         {
